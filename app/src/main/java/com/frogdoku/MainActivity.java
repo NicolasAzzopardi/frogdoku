@@ -457,11 +457,32 @@ public class MainActivity extends Activity implements GameView.Listener {
         if (screen == Screen.GAME) saveProgress();
     }
 
+    // ================= Mise en veille de l'écran =================
+
+    /** L'écran reste allumé jusqu'à 2 minutes après le dernier contact. */
+    private static final long SCREEN_TIMEOUT_MS = 2 * 60 * 1000;
+    private final Runnable releaseScreen = () ->
+            getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+    private void keepScreenOn() {
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        handler.removeCallbacks(releaseScreen);
+        handler.postDelayed(releaseScreen, SCREEN_TIMEOUT_MS);
+    }
+
+    @Override
+    public void onUserInteraction() {
+        super.onUserInteraction();
+        keepScreenOn();
+    }
+
     private long pausedElapsed = -1;
 
     @Override
     protected void onPause() {
         super.onPause();
+        handler.removeCallbacks(releaseScreen);
+        releaseScreen.run();
         if (screen == Screen.GAME && game != null && !game.isFinished()) {
             saveProgress();
             pausedElapsed = System.currentTimeMillis() - startTime;
@@ -472,6 +493,7 @@ public class MainActivity extends Activity implements GameView.Listener {
     @Override
     protected void onResume() {
         super.onResume();
+        keepScreenOn();
         if (pausedElapsed >= 0 && screen == Screen.GAME && game != null && !game.isFinished()) {
             // le chrono ne tourne pas pendant que l'appli est en arrière-plan
             startTime = System.currentTimeMillis() - pausedElapsed;

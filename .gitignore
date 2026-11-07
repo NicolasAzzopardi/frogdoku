@@ -1,0 +1,10 @@
+# Sorties de build
+build/
+/Frogdoku.apk
+*.idsig
+
+# Clés et secrets de signature (rangés dans ~/.config/frogdoku/)
+*.keystore
+*.jks
+*.pass
+*.lineage

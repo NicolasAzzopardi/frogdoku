@@ -18,14 +18,21 @@ javac --release 11 -nowarn -encoding UTF-8 -classpath "$JAR" -d "$OUT/classes" \
 (cd "$OUT/dex" && zip -q ../unsigned.apk classes.dex)
 
 "$BT/zipalign" -f -p 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
-KS="${FROGDOKU_KEYSTORE:-frogdoku.keystore}"
-PASS_FILE="${FROGDOKU_KS_PASS_FILE:-$HOME/.config/frogdoku/keystore.pass}"
-if [ ! -f "$KS" ] || [ ! -f "$PASS_FILE" ]; then
-    echo "Clé de signature introuvable : $KS et/ou $PASS_FILE" >&2
-    echo "(le mot de passe n'est volontairement pas stocké dans le projet)" >&2
-    exit 1
-fi
-"$BT/apksigner" sign --ks "$KS" --ks-key-alias frogdoku \
-    --ks-pass "file:$PASS_FILE" \
+# Signature avec rotation de clé (APK Signature Scheme v3) :
+#  - Android 9+ : nouvelle clé (frogdoku-2), reconnue grâce à la lignée signée par l'ancienne ;
+#  - Android 7/8 : ancienne clé (v1/v2), seule possible sur ces versions.
+# Les clés et mots de passe sont hors du dépôt, dans ~/.config/frogdoku/.
+KEYS="${FROGDOKU_KEYS_DIR:-$HOME/.config/frogdoku}"
+for f in frogdoku.keystore keystore.pass frogdoku-2.keystore keystore2.pass frogdoku.lineage; do
+    if [ ! -f "$KEYS/$f" ]; then
+        echo "Fichier de signature manquant : $KEYS/$f" >&2
+        exit 1
+    fi
+done
+"$BT/apksigner" sign \
+    --ks "$KEYS/frogdoku.keystore" --ks-key-alias frogdoku --ks-pass "file:$KEYS/keystore.pass" \
+    --next-signer \
+    --ks "$KEYS/frogdoku-2.keystore" --ks-key-alias frogdoku2 --ks-pass "file:$KEYS/keystore2.pass" \
+    --lineage "$KEYS/frogdoku.lineage" --rotation-min-sdk-version 28 \
     --out Frogdoku.apk "$OUT/aligned.apk"
 echo "OK -> $(pwd)/Frogdoku.apk"
