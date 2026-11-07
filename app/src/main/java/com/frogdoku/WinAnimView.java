@@ -18,7 +18,8 @@ public class WinAnimView extends View {
     public static final String[] NAMES = {
             "Saut de nénuphar en nénuphar", "Le chant de la pluie", "La grimpette",
             "Chasse aux lucioles", "La chorale de l'étang", "Nénuphars en fleur",
-            "Le grand saut", "Rainettes parachutistes"
+            "Le grand saut", "Rainettes parachutistes", "Le bouquet de ballons",
+            "La danse des rainettes", "L'arc-en-ciel", "Le plongeon"
     };
     public static final int COUNT = NAMES.length;
     private static final long DUR = 4200;
@@ -135,8 +136,13 @@ public class WinAnimView extends View {
         }
     }
 
+    /** Opacité du fond de scène : le plateau flouté reste visible dessous. */
+    private int bgAlpha = 0x80;
+
     private void bg(Canvas c, int top, int bottom) {
         p.setStyle(Paint.Style.FILL);
+        top = (bgAlpha << 24) | (top & 0xFFFFFF);
+        bottom = (bgAlpha << 24) | (bottom & 0xFFFFFF);
         int h = getHeight();
         int bands = 24;
         for (int i = 0; i < bands; i++) {
@@ -164,6 +170,7 @@ public class WinAnimView extends View {
         float alpha = Math.min(clamp(t / 0.08f), clamp((1 - t) / 0.08f));
         int save = c.saveLayerAlpha(0, 0, getWidth(), getHeight(), (int) (alpha * 255));
         boolean darkScene;
+        bgAlpha = (variant == 1 || variant == 3) ? 0xC8 : 0x80;
         switch (variant) {
             case 0: hopping(c, t); darkScene = false; break;
             case 1: rain(c, t); darkScene = true; break;
@@ -172,7 +179,11 @@ public class WinAnimView extends View {
             case 4: choir(c, t); darkScene = false; break;
             case 5: bloom(c, t); darkScene = false; break;
             case 6: bigJump(c, t); darkScene = false; break;
-            default: parachute(c, t); darkScene = false; break;
+            case 7: parachute(c, t); darkScene = false; break;
+            case 8: balloons(c, t); darkScene = false; break;
+            case 9: dance(c, t); darkScene = false; break;
+            case 10: rainbow(c, t); darkScene = false; break;
+            default: dive(c, t); darkScene = false; break;
         }
         title(c, darkScene);
         c.restoreToCount(save);
@@ -197,7 +208,7 @@ public class WinAnimView extends View {
     private void hopping(Canvas c, float t) {
         float w = getWidth(), h = getHeight(), s = Math.min(w, h);
         bg(c, 0xFFE3F6FF, 0xFFBDE6F5);
-        p.setColor(0xFF8FD3F4);
+        p.setColor(0xB38FD3F4);
         c.drawRect(0, h * 0.62f, w, h, p);
         int pads = 5;
         float[] px = new float[pads + 2];
@@ -475,6 +486,194 @@ public class WinAnimView extends View {
             c.restore();
             boolean landed = local >= 1;
             frog(c, x, y, fs, landed ? pulse(clamp(t * 2 - i * 0.2f), 1) : 0, 0, i, landed ? 0 : 0.8f);
+        }
+    }
+
+    private void cloud(Canvas c, float x, float y, float s) {
+        p.setStyle(Paint.Style.FILL);
+        p.setColor(0xF0FFFFFF);
+        c.drawCircle(x, y, s * 0.05f, p);
+        c.drawCircle(x + s * 0.05f, y - s * 0.02f, s * 0.06f, p);
+        c.drawCircle(x + s * 0.11f, y, s * 0.045f, p);
+        r.set(x - s * 0.04f, y - s * 0.01f, x + s * 0.15f, y + s * 0.045f);
+        c.drawRoundRect(r, s * 0.03f, s * 0.03f, p);
+    }
+
+    private void sparkle(Canvas c, float x, float y, float size, int alpha) {
+        p.setStyle(Paint.Style.FILL);
+        p.setColor((alpha << 24) | 0xFFF59D);
+        path.reset();
+        path.moveTo(x, y - size);
+        path.quadTo(x, y, x + size, y);
+        path.quadTo(x, y, x, y + size);
+        path.quadTo(x, y, x - size, y);
+        path.quadTo(x, y, x, y - size);
+        c.drawPath(path, p);
+    }
+
+    /** 8 : la rainette s'envole accrochée à un bouquet de ballons. */
+    private void balloons(Canvas c, float t) {
+        float w = getWidth(), h = getHeight(), s = Math.min(w, h);
+        bg(c, 0xFFE1F5FE, 0xFFFFF3E0);
+        for (int i = 0; i < 3; i++)
+            cloud(c, ((fx[i] + t * (0.08f + 0.05f * i)) % 1.3f) * w - w * 0.15f, h * (0.25f + 0.2f * i), s);
+        float rise = easeOut(t / 0.75f);
+        float x = w / 2 + (float) Math.sin(t * 7) * s * 0.06f;
+        float y = lerp(h * 1.15f, h * 0.62f, rise) + (t > 0.75f ? (float) Math.sin((t - 0.75f) * 25) * s * 0.012f : 0);
+        float fs = s * 0.26f;
+        float sway = (float) Math.sin(t * 7 + 1) * 0.06f;
+        int[] cols = {0xFFFF5A5F, 0xFFFFC93C, 0xFF4FC3F7, 0xFFB388FF};
+        float[][] off = {{-0.13f, -0.60f}, {0.0f, -0.74f}, {0.14f, -0.60f}, {0.07f, -0.50f}};
+        float handX = x, handY = y - fs * 0.05f;
+        for (int i = 0; i < 4; i++) {
+            float bx = x + (off[i][0] + sway * (1 + i * 0.3f)) * s, by = y + off[i][1] * s * 0.75f;
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(s * 0.004f);
+            p.setColor(0xAA555555);
+            c.drawLine(handX, handY, bx, by + s * 0.085f, p);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(cols[(i + (int) (fw[0] * 4)) % cols.length]);
+            r.set(bx - s * 0.07f, by - s * 0.085f, bx + s * 0.07f, by + s * 0.085f);
+            c.drawOval(r, p);
+            path.reset();
+            path.moveTo(bx, by + s * 0.08f);
+            path.lineTo(bx - s * 0.015f, by + s * 0.1f);
+            path.lineTo(bx + s * 0.015f, by + s * 0.1f);
+            path.close();
+            c.drawPath(path, p);
+            p.setColor(0x66FFFFFF);
+            r.set(bx - s * 0.045f, by - s * 0.06f, bx - s * 0.01f, by - s * 0.01f);
+            c.drawOval(r, p);
+        }
+        frog(c, x, y, fs, t > 0.8f ? pulse((t - 0.8f) / 0.2f, 1) : 0, blinkAt(t, 0.5f), 0, 0.7f);
+    }
+
+    /** 9 : deux rainettes dansent en sautant chacune à leur tour. */
+    private void dance(Canvas c, float t) {
+        float w = getWidth(), h = getHeight(), s = Math.min(w, h);
+        bg(c, 0xFFF3E5F5, 0xFFFFF8E1);
+        float base = h * 0.66f;
+        lilyPad(c, w * 0.32f, base + s * 0.12f, s * 0.3f, s * 0.09f, 0xFF66BB6A);
+        lilyPad(c, w * 0.68f, base + s * 0.12f, s * 0.3f, s * 0.09f, 0xFF4CAF50);
+        for (int k = 0; k < 2; k++) {
+            float ph = (t * 3.2f + k * 0.5f) % 1f;
+            float jump = bump(ph);
+            float x = w * (k == 0 ? 0.32f : 0.68f);
+            float y = base - jump * s * 0.17f;
+            c.save();
+            c.rotate((float) Math.sin(t * 14 + k * 3) * 12, x, y);
+            frog(c, x, y, s * 0.24f, jump < 0.2f ? 0.6f : 0, 0, k + 2, jump);
+            c.restore();
+        }
+        for (int i = 0; i < 10; i++) {
+            float tw = (float) Math.sin(t * 12 + i * 1.7f);
+            if (tw > 0) sparkle(c, fx[i] * w, h * (0.2f + fy[i] * 0.4f), s * 0.025f * tw, (int) (tw * 255));
+        }
+        for (int i = 0; i < 4; i++) {
+            float ph = (t * 1.4f + i / 4f) % 1f;
+            note(c, w * (0.2f + 0.2f * i), h * 0.55f - ph * h * 0.3f, s * 0.06f, (int) ((1 - ph) * 220), 0xFF8E24AA, i % 2 == 0);
+        }
+    }
+
+    /** 10 : un arc-en-ciel se dessine et la rainette glisse dessus. */
+    private void rainbow(Canvas c, float t) {
+        float w = getWidth(), h = getHeight(), s = Math.min(w, h);
+        bg(c, 0xFFE3F2FD, 0xFFFFFDE7);
+        int[] cols = {0xFFFF5252, 0xFFFF9800, 0xFFFFEB3B, 0xFF66BB6A, 0xFF42A5F5, 0xFF7E57C2};
+        float cx = w / 2, cy = h * 0.78f, band = s * 0.045f, r0 = s * 0.42f;
+        float prog = easeOut(t / 0.35f);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeCap(Paint.Cap.BUTT);
+        p.setStrokeWidth(band);
+        for (int i = 0; i < cols.length; i++) {
+            float rr = r0 - i * band;
+            p.setColor(cols[i]);
+            r.set(cx - rr, cy - rr, cx + rr, cy + rr);
+            c.drawArc(r, 180, 180 * prog, false, p);
+        }
+        cloud(c, cx - r0 - s * 0.05f, cy, s * 1.3f);
+        cloud(c, cx + r0 - s * 0.1f, cy, s * 1.3f);
+        float u = clamp((t - 0.35f) / 0.4f);
+        float rm = r0 + band;
+        if (t > 0.35f) {
+            float a = (float) Math.toRadians(180 + 180 * u);
+            float fxp = cx + (float) Math.cos(a) * rm, fyp = cy + (float) Math.sin(a) * rm - s * 0.08f;
+            for (int k = 1; k <= 5; k++) {
+                float ua = clamp(u - k * 0.04f);
+                float aa = (float) Math.toRadians(180 + 180 * ua);
+                sparkle(c, cx + (float) Math.cos(aa) * rm, cy + (float) Math.sin(aa) * rm - s * 0.05f,
+                        s * 0.02f * (1 - k / 6f), 255 - k * 40);
+            }
+            float sac = t > 0.8f ? pulse((t - 0.8f) / 0.2f, 1.5f) : 0;
+            c.save();
+            c.rotate(u < 1 ? (u - 0.5f) * 70 : 0, fxp, fyp);
+            frog(c, fxp, fyp, s * 0.2f, sac, blinkAt(t, 0.85f), 1, u < 1 ? 0.3f : 0);
+            c.restore();
+        }
+    }
+
+    /** 11 : la rainette plonge dans la mare et ressort en faisant un clin d'œil. */
+    private void dive(Canvas c, float t) {
+        float w = getWidth(), h = getHeight(), s = Math.min(w, h);
+        bg(c, 0xFFE8F5E9, 0xFFE3F2FD);
+        float water = h * 0.62f;
+        p.setStyle(Paint.Style.FILL);
+        p.setColor(0xB34FC3F7);
+        c.drawRect(0, water, w, h, p);
+        float padX = w * 0.22f, padY = water;
+        lilyPad(c, padX, padY, s * 0.28f, s * 0.08f, 0xFF66BB6A);
+        float splashX = w * 0.62f;
+        float jt = clamp(t / 0.3f);
+        if (t < 0.3f) {
+            float x = lerp(padX, splashX, jt), y = lerp(padY - s * 0.08f, water + s * 0.1f, jt) - bump(jt) * s * 0.35f;
+            c.save();
+            c.clipRect(0, 0, w, water);
+            frog(c, x, y, s * 0.2f, 0, 0, 0, bump(jt));
+            c.restore();
+        }
+        // éclaboussures
+        float st = (t - 0.3f) / 0.3f;
+        if (st > 0 && st < 1) {
+            p.setColor(0xDDB3E5FC);
+            for (int i = 0; i < 14; i++) {
+                float ang = (float) Math.toRadians(200 + 140 * fx[i]);
+                float v = s * (0.25f + 0.25f * fy[i]);
+                float dx = (float) Math.cos(ang) * v * st, dy = (float) Math.sin(ang) * v * st + s * 0.6f * st * st;
+                c.drawCircle(splashX + dx, water + dy, s * 0.012f * (1 - st * 0.5f), p);
+            }
+        }
+        // ronds dans l'eau
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(s * 0.005f);
+        for (int k = 0; k < 3; k++) {
+            float rp = clamp((t - 0.3f - k * 0.08f) / 0.4f);
+            if (rp <= 0 || rp >= 1) continue;
+            p.setColor(((int) ((1 - rp) * 220) << 24) | 0xFFFFFF);
+            r.set(splashX - rp * s * 0.3f, water - rp * s * 0.06f, splashX + rp * s * 0.3f, water + rp * s * 0.06f);
+            c.drawOval(r, p);
+        }
+        // bulles
+        p.setStyle(Paint.Style.STROKE);
+        for (int i = 0; i < 8; i++) {
+            float bt = clamp((t - 0.35f - fw[i] * 0.2f) / 0.3f);
+            if (bt <= 0 || bt >= 1) continue;
+            p.setColor(0xCCFFFFFF);
+            c.drawCircle(splashX + (fx[i] - 0.5f) * s * 0.15f + (float) Math.sin(bt * 9 + i) * s * 0.01f,
+                    lerp(h * 0.9f, water, bt), s * (0.008f + 0.01f * fz[i]), p);
+        }
+        // remontée + clin d'œil
+        if (t > 0.62f) {
+            float ut = easeOut((t - 0.62f) / 0.15f);
+            float y = lerp(water + s * 0.2f, water - s * 0.06f, ut);
+            float wink = clamp((t - 0.82f) / 0.05f) * (1 - clamp((t - 0.92f) / 0.05f));
+            c.save();
+            c.clipRect(0, 0, w, water + s * 0.02f);
+            TreeFrogPainter.draw(c, splashX, y, s * 0.24f, 0, 0, wink, body[0], eye[0], 0);
+            c.restore();
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(0x884FC3F7);
+            r.set(splashX - s * 0.15f, water - s * 0.01f, splashX + s * 0.15f, water + s * 0.03f);
+            c.drawOval(r, p);
         }
     }
 }

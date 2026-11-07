@@ -15,7 +15,7 @@ import java.util.List;
  * Les grilles sont pré-générées (tools/LevelGen.java) dans assets/levels.txt.
  */
 public class Puzzle {
-    public static final int MIN_SIZE = 5, MAX_SIZE = 12;
+    public static final int MIN_SIZE = 5, MAX_SIZE = 16;
 
     public final int n;
     public final int[][] region;   // region[ligne][colonne] = indice de région

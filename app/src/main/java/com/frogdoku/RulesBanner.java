@@ -31,11 +31,7 @@ public class RulesBanner extends LinearLayout {
         setBaselineAligned(false);
         int pad = dp(6);
         setPadding(pad, pad, pad, pad);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(OUTER);
-        bg.setCornerRadius(dp(18));
-        bg.setStroke(dp(1), 0x14000000);
-        setBackground(bg);
+        setBackground(Ui.panel(ctx, 0xEEFFFFFF, 20));
         addCard(REGION, REGION_MASK, "1 par étang");
         addCard(LINES, null, "1 par ligne et colonne");
         addCard(TOUCH, null, "Jamais côte à côte");
@@ -60,11 +56,11 @@ public class RulesBanner extends LinearLayout {
         card.addView(new MiniGrid(getContext(), pattern, mask), new LayoutParams(dp(30), dp(30)));
         TextView t = new TextView(getContext());
         t.setText(label);
-        t.setTextColor(INK);
-        t.setTextSize(11.5f);
+        t.setTextColor(Ui.INK);
+        t.setTextSize(12.5f);
         t.setMaxLines(4);
         t.setLineSpacing(0, 0.95f);
-        t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        t.setTypeface(Ui.font(getContext()));
         LayoutParams tp = new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
         tp.leftMargin = dp(5);
         card.addView(t, tp);

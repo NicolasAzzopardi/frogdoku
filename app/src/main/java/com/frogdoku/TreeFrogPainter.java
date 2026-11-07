@@ -3,6 +3,8 @@ package com.frogdoku;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.RadialGradient;
+import android.graphics.Shader;
 import android.graphics.RectF;
 
 /** Rainette vue de face : ventouses aux doigts, sac vocal qui gonfle, yeux qui clignent. */
@@ -23,6 +25,11 @@ public final class TreeFrogPainter {
 
     private static float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
+    private static int light(int color) {
+        return Color.argb(Color.alpha(color), Color.red(color) + (255 - Color.red(color)) * 2 / 5,
+                Color.green(color) + (255 - Color.green(color)) * 2 / 5, Color.blue(color) + (255 - Color.blue(color)) * 2 / 5);
+    }
+
     /**
      * @param s     taille (largeur approximative de la grenouille)
      * @param sac   gonflement du sac vocal 0..1
@@ -32,6 +39,12 @@ public final class TreeFrogPainter {
     public static void draw(Canvas c, float cx, float cy, float s, float sac, float blinkL, float blinkR,
                             int body, int eye, float jump) {
         int dark = shade(body, 0.45f);
+        P.setShader(null);
+        // ombre portée
+        P.setStyle(Paint.Style.FILL);
+        P.setColor(0x26000000);
+        R.set(cx - 0.36f * s, cy + 0.36f * s + jump * 0.3f * s, cx + 0.36f * s, cy + 0.46f * s + jump * 0.3f * s);
+        if (jump < 0.5f) c.drawOval(R, P);
         float sw = 0.03f * s;
         P.setStrokeCap(Paint.Cap.ROUND);
         P.setStrokeJoin(Paint.Join.ROUND);
@@ -44,11 +57,13 @@ public final class TreeFrogPainter {
             limb(c, hx, hy, kx, ky, fx, fy, 0.10f * s, body, dark);
             toes(c, fx, fy, side, s, dark, jump > 0.5f ? 90 : (side > 0 ? 35 : 145));
         }
-        // corps
+        // corps (dégradé = volume)
         R.set(cx - 0.28f * s, cy - 0.22f * s, cx + 0.28f * s, cy + 0.36f * s);
         P.setStyle(Paint.Style.FILL);
-        P.setColor(body);
+        P.setShader(new RadialGradient(cx - 0.09f * s, cy - 0.08f * s, 0.42f * s,
+                new int[]{light(body), body, shade(body, 0.72f)}, new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
         c.drawOval(R, P);
+        P.setShader(null);
         P.setColor(BELLY);
         R.set(cx - 0.17f * s, cy + 0.02f * s, cx + 0.17f * s, cy + 0.33f * s);
         c.drawOval(R, P);
@@ -70,8 +85,9 @@ public final class TreeFrogPainter {
             float ex = cx + side * 0.18f * s, ey = cy - 0.20f * s, r = 0.13f * s;
             float blink = side < 0 ? blinkL : blinkR;
             P.setStyle(Paint.Style.FILL);
-            P.setColor(body);
+            P.setShader(new RadialGradient(ex - 0.04f * s, ey - 0.05f * s, r * 1.3f, light(body), body, Shader.TileMode.CLAMP));
             c.drawCircle(ex, ey, r, P);
+            P.setShader(null);
             P.setStyle(Paint.Style.STROKE);
             P.setColor(dark);
             c.drawCircle(ex, ey, r, P);
@@ -83,7 +99,8 @@ public final class TreeFrogPainter {
                 R.set(ex - 0.022f * s, ey - 0.07f * s, ex + 0.022f * s, ey + 0.07f * s);
                 c.drawOval(R, P);
                 P.setColor(Color.WHITE);
-                c.drawCircle(ex - 0.035f * s, ey - 0.04f * s, 0.022f * s, P);
+                c.drawCircle(ex - 0.035f * s, ey - 0.04f * s, 0.026f * s, P);
+                c.drawCircle(ex + 0.03f * s, ey + 0.035f * s, 0.012f * s, P);
             }
             if (blink > 0.02f) {
                 // paupière

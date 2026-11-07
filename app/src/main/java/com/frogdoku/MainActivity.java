@@ -40,8 +40,6 @@ public class MainActivity extends Activity implements GameView.Listener {
     // écran de jeu
     private GameView game;
     private int curSize, curIndex;
-    private TextView heartsView, timerView, frogsView;
-    private ToolButton undoBtn, hintBtn, autoBtn;
     private long startTime;
     private int hintsLeft;
     private final Runnable tick = new Runnable() {
@@ -58,7 +56,7 @@ public class MainActivity extends Activity implements GameView.Listener {
         Puzzle.load(this);
         Puzzle.migrate(prefs);
         root = new FrameLayout(this);
-        root.setBackgroundColor(BG);
+        root.setBackground(new Ui.PondBackground());
         root.setOnApplyWindowInsetsListener((v, ins) -> {
             @SuppressWarnings("deprecation")
             int l = ins.getSystemWindowInsetLeft(), t = ins.getSystemWindowInsetTop(),
@@ -67,8 +65,37 @@ public class MainActivity extends Activity implements GameView.Listener {
             return ins;
         });
         setContentView(root);
-        getWindow().setStatusBarColor(BG);
-        getWindow().setNavigationBarColor(BG);
+        getWindow().setStatusBarColor(0xFFBFE8F5);
+        getWindow().setNavigationBarColor(0xFFCDEBC0);
+        restoreLastScreen();
+    }
+
+    // ================= Reprise de l'écran d'avant fermeture =================
+
+    private void rememberScreen(String value) {
+        prefs.edit().putString("screen", value).apply();
+    }
+
+    /** Rouvre l'écran affiché à la fermeture : menu, liste d'un étang, ou partie en cours. */
+    private void restoreLastScreen() {
+        String last = prefs.getString("screen", "menu");
+        try {
+            String[] p = last.split(":");
+            if (p[0].equals("levels")) {
+                showLevels(Math.max(Puzzle.MIN_SIZE, Math.min(Puzzle.MAX_SIZE, Integer.parseInt(p[1]))));
+                return;
+            }
+            if (p[0].equals("game")) {
+                int size = Integer.parseInt(p[1]), idx = Integer.parseInt(p[2]);
+                if (size >= Puzzle.MIN_SIZE && size <= Puzzle.MAX_SIZE && idx >= 1 && idx <= Puzzle.count(size)) {
+                    // niveau déjà gagné (fermé pendant l'écran de victoire) : on revient à la liste
+                    if (!hasSave(size, idx) && stars(size, idx) > 0) showLevels(size);
+                    else startLevel(size, idx);
+                    return;
+                }
+            }
+        } catch (Exception ignored) {
+        }
         showMenu();
     }
 
@@ -78,30 +105,8 @@ public class MainActivity extends Activity implements GameView.Listener {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
     }
 
-    private TextView text(String s, float sp, int color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(sp);
-        t.setTextColor(color);
-        t.setGravity(Gravity.CENTER);
-        if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
-        return t;
-    }
-
-    private GradientDrawable pill(int fill, int stroke) {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(fill);
-        g.setCornerRadius(dp(18));
-        if (stroke != 0) g.setStroke(dp(3), stroke);
-        return g;
-    }
-
-    private TextView button(String s, int fill, int textColor, View.OnClickListener l) {
-        TextView t = text(s, 18, textColor, true);
-        t.setBackground(pill(fill, 0x33000000));
-        t.setPadding(dp(20), dp(12), dp(20), dp(12));
-        t.setOnClickListener(l);
-        return t;
+    private Ui.Label label(String s, float sp, int color, int outline, float outlineDp) {
+        return new Ui.Label(this, s, sp, color, outline, outlineDp);
     }
 
     private LinearLayout.LayoutParams lp(int w, int h, int marginDp) {
@@ -110,9 +115,21 @@ public class MainActivity extends Activity implements GameView.Listener {
         return p;
     }
 
+    private int totalStars() {
+        int total = 0;
+        for (int s = Puzzle.MIN_SIZE; s <= Puzzle.MAX_SIZE; s++) total += starsForSize(s);
+        return total;
+    }
+
+    /** Petit bouton rond orange « retour ». */
+    private Ui.IconButton backButton(View.OnClickListener l) {
+        return new Ui.IconButton(this, Ui.IC_BACK, null, Ui.ORANGE_TOP, Ui.ORANGE_BOT, Ui.ORANGE_EDGE, 48, l);
+    }
+
     private void setScreen(View v, Screen s) {
         if (screen == Screen.GAME) saveProgress();
         handler.removeCallbacks(tick);
+        overlay = null;
         root.removeAllViews();
         root.addView(v, new FrameLayout.LayoutParams(-1, -1));
         screen = s;
@@ -184,141 +201,181 @@ public class MainActivity extends Activity implements GameView.Listener {
         return Math.max(Puzzle.MIN_SIZE, Math.min(Puzzle.MAX_SIZE, s));
     }
 
-    /** Petite vue décorative : une rainette. */
-    private static class FrogBadge extends View {
-        FrogBadge(Context c) { super(c); }
-        @Override protected void onDraw(Canvas c) {
-            float s = Math.min(getWidth(), getHeight());
-            TreeFrogPainter.draw(c, getWidth() / 2f, getHeight() * 0.42f, s * 0.75f, 0, 0, 0,
-                    TreeFrogPainter.GREEN, TreeFrogPainter.EYE_GOLD, 0);
-        }
-    }
-
     // ================= Menu =================
 
     private void showMenu() {
+        rememberScreen("menu");
+        FrameLayout screenView = new FrameLayout(this);
+
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(Gravity.CENTER);
-        col.setPadding(dp(24), dp(24), dp(24), dp(24));
+        col.setGravity(Gravity.CENTER_HORIZONTAL);
+        col.setPadding(dp(20), dp(12), dp(20), dp(24));
 
-        col.addView(new FrogBadge(this), lp(dp(180), dp(180), 0));
-        col.addView(text("Frogdoku", 46, GREEN_DARK, true), lp(-2, -2, 4));
-        col.addView(text("Une grenouille par ligne, colonne et étang", 15, INK, false), lp(-2, -2, 4));
+        // barre du haut : étoiles gagnées
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.END);
+        top.addView(new Ui.Pill(this, Ui.IC_STAR, 0xFFFFC51A, String.valueOf(totalStars())),
+                new LinearLayout.LayoutParams(-2, dp(44)));
+        col.addView(top, new LinearLayout.LayoutParams(-1, -2));
+
+        // logo
+        col.addView(new Widgets.MenuFrog(this), new LinearLayout.LayoutParams(dp(210), dp(200)));
+        Ui.Label logo = label("Frogdoku", 58, 0xFFFFFFFF, Ui.GREEN_EDGE, 4.5f);
+        col.addView(logo, new LinearLayout.LayoutParams(-2, -2));
+        Ui.Label tag = label("Le casse-tête de l'étang", 18, 0xFFFFE27A, 0xFF8A5A12, 2.5f);
+        col.addView(tag, new LinearLayout.LayoutParams(-2, -2));
+
+        // panneau de jeu
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(Gravity.CENTER_HORIZONTAL);
+        panel.setPadding(dp(18), dp(18), dp(18), dp(20));
+        panel.setBackground(Ui.panel(this, 0xF2FFFFFF, 32));
+        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, -2);
+        pp.topMargin = dp(26);
+        col.addView(panel, pp);
 
         int[] cur = currentSave();
         int size = cur != null ? cur[0] : lastSize();
         int next = cur != null ? cur[1] : unlocked(size);
-        TextView play = button((cur != null ? "▶  Reprendre — " : "▶  Jouer — ") + size + "×" + size + " n°" + next,
-                GREEN, Color.WHITE, v -> startLevel(size, next));
-        play.setTextSize(20);
-        LinearLayout.LayoutParams p = lp(-1, -2, 8);
-        p.topMargin = dp(32);
-        col.addView(play, p);
-        col.addView(button("Étangs", CREAM, INK, v -> showLevels(lastSize())), lp(-1, -2, 8));
-        col.addView(button("Comment jouer", CREAM, INK, v -> showRules()), lp(-1, -2, 8));
+        panel.addView(label("Étang " + size + "×" + size + " · Niveau " + next, 17, Ui.INK, 0, 0));
+        FrameLayout play = Ui.button(this, cur != null ? "Reprendre" : "Jouer", 32,
+                Ui.GREEN_TOP, Ui.GREEN_BOT, Ui.GREEN_EDGE, v -> startLevel(size, next));
+        LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(-1, dp(84));
+        playLp.topMargin = dp(10);
+        panel.addView(play, playLp);
+        // la bouton Jouer « respire » pour attirer l'œil
+        android.animation.ObjectAnimator pulse = android.animation.ObjectAnimator.ofPropertyValuesHolder(play,
+                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.04f),
+                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.04f));
+        pulse.setDuration(900);
+        pulse.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        pulse.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        pulse.start();
 
-        int total = 0, max = 0;
-        for (int s = Puzzle.MIN_SIZE; s <= Puzzle.MAX_SIZE; s++) {
-            total += starsForSize(s);
-            max += Puzzle.count(s) * 3;
-        }
-        col.addView(text("★ " + total + " / " + max, 16, GOLD, true), lp(-2, -2, 16));
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
+        rowLp.topMargin = dp(16);
+        panel.addView(row, rowLp);
+        Ui.IconButton ponds = new Ui.IconButton(this, Ui.IC_GRID, "Étangs", Ui.BLUE_TOP, Ui.BLUE_BOT, Ui.BLUE_EDGE,
+                64, v -> showLevels(lastSize()));
+        Ui.IconButton rules = new Ui.IconButton(this, Ui.IC_HELP, "Règles", Ui.ORANGE_TOP, Ui.ORANGE_BOT,
+                Ui.ORANGE_EDGE, 64, v -> showRules());
+        row.addView(ponds, new LinearLayout.LayoutParams(0, -2, 1f));
+        row.addView(rules, new LinearLayout.LayoutParams(0, -2, 1f));
 
         ScrollView sv = new ScrollView(this);
         sv.setFillViewport(true);
         sv.addView(col);
-        setScreen(sv, Screen.MENU);
+        screenView.addView(sv, new FrameLayout.LayoutParams(-1, -1));
+        setScreen(screenView, Screen.MENU);
     }
 
     private void showRules() {
-        new AlertDialog.Builder(this)
-                .setTitle("Comment jouer")
-                .setMessage("Place une grenouille 🐸 sur chaque étang coloré.\n\n"
-                        + "• Une seule grenouille par ligne.\n"
-                        + "• Une seule grenouille par colonne.\n"
-                        + "• Une seule grenouille par étang (région colorée).\n"
-                        + "• Deux grenouilles ne peuvent jamais se toucher, même en diagonale.\n\n"
-                        + "Touche une case une fois pour poser une croix ✕, une deuxième fois pour poser une grenouille.\n"
-                        + "Glisse le doigt pour poser plusieurs croix d'un coup (ou les effacer en partant d'une croix).\n\n"
-                        + "Attention : chaque grenouille mal placée coûte un cœur ❤. Au bout de 3 erreurs, la partie est perdue.\n\n"
-                        + "Toutes les tailles d'étang (5×5 à 12×12) sont accessibles dès le début ; "
-                        + "dans chaque taille, les niveaux se débloquent un par un et deviennent de plus en plus difficiles.\n"
-                        + "Chaque grille a une solution unique, trouvable par pure logique.")
-                .setPositiveButton("Compris !", null)
-                .show();
+        final View[] holder = new View[1];
+        ResultCard.Config cfg = new ResultCard.Config();
+        cfg.title = "Comment jouer";
+        cfg.ribbonTop = Ui.BLUE_TOP;
+        cfg.ribbonBottom = Ui.BLUE_BOT;
+        cfg.message = "Pose une grenouille sur chaque étang coloré.\n\n"
+                + "• 1 seule par ligne et par colonne\n"
+                + "• 1 seule par étang\n"
+                + "• Jamais côte à côte, même en diagonale\n\n"
+                + "1 appui : croix ✕   ·   2 appuis : grenouille\n"
+                + "Glisse le doigt pour poser plusieurs croix.\n\n"
+                + "Une grenouille mal placée coûte une étoile.";
+        cfg.rightLabel = "Compris !";
+        cfg.right = () -> root.removeView(holder[0]);
+        holder[0] = new ResultCard(this, cfg);
+        root.addView(holder[0], new FrameLayout.LayoutParams(-1, -1));
     }
 
     // ================= Niveaux =================
 
     private void showLevels(int size) {
+        rememberScreen("levels:" + size);
         prefs.edit().putInt("lastSize", size).apply();
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(dp(12), dp(8), dp(12), dp(24));
+        col.setPadding(dp(14), dp(10), dp(14), dp(24));
 
+        // barre du haut
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text("‹", 34, INK, true);
-        back.setPadding(dp(12), 0, dp(16), 0);
-        back.setOnClickListener(v -> showMenu());
-        bar.addView(back);
-        bar.addView(text("Étangs", 26, GREEN_DARK, true));
+        bar.addView(backButton(v -> showMenu()), new LinearLayout.LayoutParams(dp(52), dp(56)));
+        Ui.Label title = label("Étangs", 32, 0xFFFFFFFF, Ui.GREEN_EDGE, 3.5f);
+        LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, -2, 1f);
+        tl.leftMargin = dp(10);
+        title.setGravityStart();
+        bar.addView(title, tl);
+        bar.addView(new Ui.Pill(this, Ui.IC_STAR, 0xFFFFC51A, String.valueOf(totalStars())),
+                new LinearLayout.LayoutParams(-2, dp(44)));
         col.addView(bar);
 
-        // choix de la taille : toutes accessibles
+        // onglets des tailles (toutes accessibles)
         LinearLayout chips = new LinearLayout(this);
-        chips.setPadding(0, dp(8), 0, dp(8));
+        chips.setPadding(dp(2), dp(12), dp(2), dp(12));
         for (int s = Puzzle.MIN_SIZE; s <= Puzzle.MAX_SIZE; s++) {
             final int sz = s;
             boolean sel = s == size;
-            TextView chip = text(s + "×" + s + "\n" + doneForSize(s) + "/" + Puzzle.count(s),
-                    15, sel ? Color.WHITE : INK, true);
-            chip.setBackground(pill(sel ? GREEN : CREAM, 0x22000000));
-            chip.setPadding(dp(14), dp(8), dp(14), dp(8));
+            LinearLayout chip = new LinearLayout(this);
+            chip.setOrientation(LinearLayout.VERTICAL);
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(dp(14), dp(6), dp(14), dp(11));
+            if (sel) chip.setBackground(Ui.glossy(this, Ui.GREEN_TOP, Ui.GREEN_BOT, Ui.GREEN_EDGE, 20, 3));
+            else chip.setBackground(Ui.glossy(this, 0xFFFFFFFF, 0xFFF1ECE4, 0xFFD3CABD, 20, 0));
+            chip.addView(label(s + "×" + s, 20, sel ? 0xFFFFFFFF : Ui.INK, sel ? Ui.GREEN_EDGE : 0, 2f));
+            chip.addView(label(doneForSize(s) + "/" + Puzzle.count(s), 12, sel ? 0xFFEFFFE6 : 0xFF8C7B6B, 0, 0));
             chip.setOnClickListener(v -> showLevels(sz));
+            Ui.pressable(chip);
             LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, -2);
             cp.setMargins(dp(4), 0, dp(4), 0);
             chips.addView(chip, cp);
         }
         HorizontalScrollView hs = new HorizontalScrollView(this);
         hs.setHorizontalScrollBarEnabled(false);
+        hs.setClipToPadding(false);
         hs.addView(chips);
         col.addView(hs);
 
-        TextView head = text("Étang " + size + "×" + size + "   ★ " + starsForSize(size) + " / "
-                + (Puzzle.count(size) * 3), 18, INK, true);
-        head.setGravity(Gravity.START);
-        head.setPadding(dp(8), dp(10), 0, dp(6));
-        col.addView(head);
+        // panneau des niveaux
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(10), dp(14), dp(10), dp(16));
+        panel.setBackground(Ui.panel(this, 0xEEFFFFFF, 30));
+        Ui.Label head = label("Étang " + size + "×" + size + "   ★ " + starsForSize(size) + " / "
+                + (Puzzle.count(size) * 3), 19, Ui.INK, 0, 0);
+        panel.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
         GridLayout grid = new GridLayout(this);
         grid.setColumnCount(5);
         int unl = unlocked(size);
         for (int i = 1; i <= Puzzle.count(size); i++) {
             final int idx = i;
-            boolean open = i <= unl;
             int st = stars(size, i);
-            boolean inProgress = open && hasSave(size, i);
-            String sub = inProgress ? "⏳" : (st > 0 ? "★★★".substring(0, st) + "☆☆☆".substring(st) : " ");
-            String label = open ? (i + "\n" + sub) : "🔒";
-            TextView cell = text(label, 15, open ? INK : 0x88000000, true);
-            int fill = !open ? 0xFFE3DCD3 : inProgress ? 0xFFFFE0B2 : (st > 0 ? 0xFFB8E6A6 : CREAM);
-            cell.setBackground(pill(fill, 0x22000000));
-            if (open) cell.setOnClickListener(v -> startLevel(size, idx));
+            int state;
+            if (i > unl) state = Widgets.LevelTile.LOCKED;
+            else if (hasSave(size, i)) state = Widgets.LevelTile.IN_PROGRESS;
+            else if (st > 0) state = Widgets.LevelTile.DONE;
+            else state = Widgets.LevelTile.CURRENT;
+            Widgets.LevelTile tile = new Widgets.LevelTile(this, i, state, st);
+            if (state != Widgets.LevelTile.LOCKED) tile.setOnClickListener(v -> startLevel(size, idx));
             GridLayout.LayoutParams gp = new GridLayout.LayoutParams(
                     GridLayout.spec(GridLayout.UNDEFINED), GridLayout.spec(GridLayout.UNDEFINED, 1f));
             gp.width = 0;
-            gp.height = dp(64);
-            gp.setMargins(dp(4), dp(4), dp(4), dp(4));
-            grid.addView(cell, gp);
+            gp.height = dp(80);
+            gp.setMargins(dp(2), dp(6), dp(2), dp(2));
+            grid.addView(tile, gp);
         }
-        col.addView(grid, new LinearLayout.LayoutParams(-1, -2));
+        panel.addView(grid, new LinearLayout.LayoutParams(-1, -2));
+        col.addView(panel, new LinearLayout.LayoutParams(-1, -2));
 
         ScrollView sv = new ScrollView(this);
         sv.addView(col);
         setScreen(sv, Screen.LEVELS);
-        // garder la puce sélectionnée visible
+        // garder l'onglet sélectionné visible
         hs.post(() -> {
             View sel = chips.getChildAt(size - Puzzle.MIN_SIZE);
             hs.scrollTo(Math.max(0, sel.getLeft() - dp(40)), 0);
@@ -327,89 +384,78 @@ public class MainActivity extends Activity implements GameView.Listener {
 
     // ================= Jeu =================
 
-    /** Bouton d'outil : grosse icône + libellé. */
-    private class ToolButton extends LinearLayout {
-        final TextView icon, label;
-        ToolButton(String ic, String lb, View.OnClickListener l) {
-            super(MainActivity.this);
-            setOrientation(VERTICAL);
-            setGravity(Gravity.CENTER);
-            icon = text(ic, 30, INK, false);
-            label = text(lb, 13, INK, true);
-            addView(icon);
-            addView(label);
-            setBackground(pill(CREAM, 0x22000000));
-            setOnClickListener(l);
-        }
-    }
+    private Widgets.HeartsView heartsView;
+    private Ui.Pill timerPill;
+    private Ui.IconButton undoBtn, hintBtn, autoBtn;
 
     private void startLevel(int size, int index) {
         if (screen == Screen.GAME) saveProgress(); // sauvegarde le niveau qu'on quitte
         curSize = size;
         curIndex = index;
         prefs.edit().putInt("lastSize", size).apply();
+        rememberScreen("game:" + size + ":" + index);
         Puzzle p = Puzzle.get(size, index);
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(dp(12), dp(4), dp(12), dp(8));
+        col.setPadding(dp(12), dp(8), dp(12), dp(8));
+        col.setClipChildren(false);
 
-        // barre du haut
+        // HUD : retour · titre · cœurs
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text("‹", 34, INK, true);
-        back.setPadding(dp(8), 0, dp(12), 0);
-        back.setOnClickListener(v -> showLevels(curSize));
-        bar.addView(back);
-        TextView title = text("Étang " + size + "×" + size + " · n°" + index, 20, GREEN_DARK, true);
-        title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        bar.addView(title, new LinearLayout.LayoutParams(0, -2, 1f));
-        heartsView = text("", 22, 0xFFE53935, true);
-        bar.addView(heartsView);
-        col.addView(bar, new LinearLayout.LayoutParams(-1, dp(56)));
+        bar.addView(backButton(v -> showLevels(curSize)), new LinearLayout.LayoutParams(dp(52), dp(56)));
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        titles.setGravity(Gravity.CENTER);
+        titles.addView(label("Étang " + size + "×" + size, 24, 0xFFFFFFFF, Ui.GREEN_EDGE, 3f));
+        titles.addView(label("Niveau " + index, 15, Ui.INK, 0, 0));
+        bar.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
+        heartsView = new Widgets.HeartsView(this);
+        bar.addView(heartsView, new LinearLayout.LayoutParams(dp(108), dp(38)));
+        col.addView(bar, new LinearLayout.LayoutParams(-1, -2));
 
         // bandeau des règles
-        col.addView(new RulesBanner(this), lp(-1, -2, 2));
+        col.addView(new RulesBanner(this), lp(-1, -2, 4));
 
-        // infos
-        LinearLayout info = new LinearLayout(this);
-        timerView = text("0:00", 16, INK, true);
-        frogsView = text("", 16, INK, true);
-        info.addView(timerView, new LinearLayout.LayoutParams(0, -2, 1f));
-        info.addView(frogsView, new LinearLayout.LayoutParams(0, -2, 1f));
-        col.addView(info, lp(-1, -2, 4));
+        // chrono
+        timerPill = new Ui.Pill(this, Ui.IC_CLOCK, 0xFFFFFFFF, "0:00");
+        timerPill.icon.setOutline(0xFF3B6EA8);
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, dp(42));
+        tp.gravity = Gravity.CENTER_HORIZONTAL;
+        tp.topMargin = dp(2);
+        col.addView(timerPill, tp);
 
         // plateau
         game = new GameView(this);
         game.setAutoMark(prefs.getBoolean("automark", true));
         game.setListener(this);
-        game.setBackdrop(BG);
         FrameLayout boardBox = new FrameLayout(this);
         boardBox.addView(game, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
         col.addView(boardBox, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        // barre d'outils : boutons hauts, grosses icônes, décollés du bord
+        // outils : gros boutons ronds brillants
         LinearLayout tools = new LinearLayout(this);
         tools.setGravity(Gravity.CENTER);
-        undoBtn = new ToolButton("↩️", "Annuler", v -> game.undo());
+        tools.setClipChildren(false);
+        undoBtn = new Ui.IconButton(this, Ui.IC_UNDO, "Annuler", Ui.BLUE_TOP, Ui.BLUE_BOT, Ui.BLUE_EDGE, 66,
+                v -> game.undo());
         hintsLeft = 3;
-        hintBtn = new ToolButton("💡", "", v -> {
+        hintBtn = new Ui.IconButton(this, Ui.IC_HINT, "Indice", Ui.ORANGE_TOP, Ui.ORANGE_BOT, Ui.ORANGE_EDGE, 66, v -> {
             if (hintsLeft > 0 && game.hint()) hintsLeft--;
             updateHud();
         });
-        autoBtn = new ToolButton("✖️", "", v -> {
+        autoBtn = new Ui.IconButton(this, Ui.IC_CROSS, "Auto ✕", Ui.GREEN_TOP, Ui.GREEN_BOT, Ui.GREEN_EDGE, 66, v -> {
             game.setAutoMark(!game.isAutoMark());
             prefs.edit().putBoolean("automark", game.isAutoMark()).apply();
             updateHud();
         });
-        ToolButton clear = new ToolButton("🧹", "Effacer", v -> game.clearBoard());
-        for (ToolButton t : new ToolButton[]{undoBtn, hintBtn, autoBtn, clear}) {
-            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0, dp(96), 1f);
-            tp.setMargins(dp(5), 0, dp(5), 0);
-            tools.addView(t, tp);
-        }
+        Ui.IconButton clear = new Ui.IconButton(this, Ui.IC_ERASE, "Effacer", Ui.PINK_TOP, Ui.PINK_BOT, Ui.PINK_EDGE,
+                66, v -> game.clearBoard());
+        for (Ui.IconButton t : new Ui.IconButton[]{undoBtn, hintBtn, autoBtn, clear})
+            tools.addView(t, new LinearLayout.LayoutParams(0, -2, 1f));
         LinearLayout.LayoutParams toolsLp = new LinearLayout.LayoutParams(-1, -2);
-        toolsLp.setMargins(0, dp(12), 0, dp(28));
+        toolsLp.setMargins(0, dp(10), 0, dp(20));
         col.addView(tools, toolsLp);
 
         // lire la sauvegarde AVANT setPuzzle (qui déclenche une sauvegarde de la grille vide)
@@ -433,23 +479,20 @@ public class MainActivity extends Activity implements GameView.Listener {
     }
 
     private void updateTimer() {
-        if (timerView == null) return;
+        if (timerPill == null) return;
         long sec = (System.currentTimeMillis() - startTime) / 1000;
-        timerView.setText("⏱ " + (sec / 60) + ":" + String.format(java.util.Locale.ROOT, "%02d", sec % 60));
+        timerPill.value.setText(formatTime(sec));
     }
 
     private void updateHud() {
-        if (game == null || game.getPuzzle() == null) return;
-        int h = game.getHearts();
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < GameView.MAX_HEARTS; i++) sb.append(i < h ? "❤" : "♡");
-        heartsView.setText(sb.toString());
-        frogsView.setText("🐸 " + game.frogCount() + " / " + game.getPuzzle().n);
-        undoBtn.setAlpha(game.canUndo() ? 1f : 0.4f);
-        hintBtn.label.setText("Indice (" + hintsLeft + ")");
-        hintBtn.setAlpha(hintsLeft > 0 && !game.isFinished() ? 1f : 0.4f);
-        autoBtn.label.setText("Auto " + (game.isAutoMark() ? "ON" : "OFF"));
-        autoBtn.setBackground(pill(game.isAutoMark() ? 0xFFB8E6A6 : CREAM, 0x22000000));
+        if (game == null || game.getPuzzle() == null || heartsView == null) return;
+        heartsView.setHearts(game.getHearts());
+        undoBtn.setAlpha(game.canUndo() ? 1f : 0.45f);
+        hintBtn.setBadge(String.valueOf(hintsLeft));
+        hintBtn.setAlpha(hintsLeft > 0 && !game.isFinished() ? 1f : 0.45f);
+        if (game.isAutoMark()) autoBtn.setColors(Ui.GREEN_TOP, Ui.GREEN_BOT, Ui.GREEN_EDGE);
+        else autoBtn.setColors(Ui.GRAY_TOP, Ui.GRAY_BOT, Ui.GRAY_EDGE);
+        autoBtn.label.setText(game.isAutoMark() ? "Auto ✕" : "Auto off");
     }
 
     @Override public void onStateChanged() {
@@ -503,13 +546,70 @@ public class MainActivity extends Activity implements GameView.Listener {
         pausedElapsed = -1;
     }
 
+    // ================= Fin de partie : flou + animation + carte =================
+
+    /** Calque posé au-dessus du plateau terminé (flou, animation, carte de résultat). */
+    private FrameLayout overlay;
+
+    private static final int[] ANIM_ORDER = {0, 3, 6, 8, 1, 4, 7, 9, 2, 5, 10, 11};
+
+    private static String formatTime(long sec) {
+        return (sec / 60) + ":" + String.format(java.util.Locale.ROOT, "%02d", sec % 60);
+    }
+
+    /** Floute l'écran de jeu (RenderEffect sur Android 12+, image réduite sinon) et ajoute le calque. */
+    private void openOverlay() {
+        if (overlay != null) return;
+        View board = root.getChildAt(0);
+        overlay = new FrameLayout(this);
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            android.animation.ValueAnimator va = android.animation.ValueAnimator.ofFloat(0.1f, dp(16));
+            va.setDuration(450);
+            va.addUpdateListener(an -> {
+                float r = (float) an.getAnimatedValue();
+                board.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(r, r,
+                        android.graphics.Shader.TileMode.CLAMP));
+            });
+            va.start();
+        } else if (board.getWidth() > 0 && board.getHeight() > 0) {
+            // flou approximatif : capture réduite 12 fois puis agrandie avec filtrage
+            int w = Math.max(1, board.getWidth() / 12), h = Math.max(1, board.getHeight() / 12);
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bmp);
+            c.scale(w / (float) board.getWidth(), h / (float) board.getHeight());
+            c.drawColor(BG);
+            board.draw(c);
+            android.widget.ImageView iv = new android.widget.ImageView(this);
+            android.graphics.drawable.BitmapDrawable bd = new android.graphics.drawable.BitmapDrawable(getResources(), bmp);
+            bd.setFilterBitmap(true);
+            iv.setImageDrawable(bd);
+            iv.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
+            iv.setAlpha(0f);
+            iv.animate().alpha(1f).setDuration(400).start();
+            overlay.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+        }
+        overlay.setClickable(true);
+        root.addView(overlay, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void showCard(ResultCard.Config cfg) {
+        if (overlay == null || isFinishing() || screen != Screen.GAME) return;
+        overlay.addView(new ResultCard(this, cfg), new FrameLayout.LayoutParams(-1, -1));
+    }
+
     @Override
     public void onWin() {
         handler.removeCallbacks(tick);
         final int size = curSize, idx = curIndex, st = game.getHearts();
         final long sec = (System.currentTimeMillis() - startTime) / 1000;
         clearSave(size, idx);
+        String bestKey = "best_" + size + "_" + idx;
+        long best = prefs.getLong(bestKey, -1);
+        final boolean record = best < 0 || sec < best;
+        final boolean hadBest = best >= 0;
+        final long bestShown = record ? sec : best;
         SharedPreferences.Editor ed = prefs.edit();
+        if (record) ed.putLong(bestKey, sec);
         if (st > stars(size, idx)) ed.putInt("stars_" + size + "_" + idx, st);
         if (idx + 1 > prefs.getInt("unl_" + size, 1)) ed.putInt("unl_" + size, Math.min(idx + 1, Puzzle.count(size)));
         // animation différente à chaque fois
@@ -518,28 +618,31 @@ public class MainActivity extends Activity implements GameView.Listener {
         ed.apply();
         if (isFinishing() || screen != Screen.GAME) return;
 
-        int[] order = {0, 3, 6, 1, 4, 7, 2, 5};
+        openOverlay();
         final WinAnimView[] holder = new WinAnimView[1];
-        holder[0] = new WinAnimView(this, order[counter % order.length], System.nanoTime(), () -> {
-            root.post(() -> root.removeView(holder[0]));
-            showWinDialog(size, idx, st, sec);
+        holder[0] = new WinAnimView(this, ANIM_ORDER[counter % ANIM_ORDER.length], System.nanoTime(), () -> {
+            if (overlay != null) overlay.post(() -> { if (overlay != null) overlay.removeView(holder[0]); });
+            ResultCard.Config cfg = new ResultCard.Config();
+            cfg.title = "Étang réussi !";
+            cfg.bigLabel = "Temps";
+            cfg.bigText = formatTime(sec);
+            cfg.subText = record ? (hadBest ? "Nouveau record !" : "Étang " + size + "×" + size + " · n°" + idx)
+                    : "Record : " + formatTime(bestShown);
+            cfg.stars = st;
+            cfg.leftLabel = "Rejouer";
+            cfg.left = () -> startLevel(size, idx);
+            cfg.rightLabel = "Suivant";
+            cfg.right = () -> playNext(size, idx);
+            showCard(cfg);
         });
-        root.addView(holder[0], new FrameLayout.LayoutParams(-1, -1));
+        overlay.addView(holder[0], new FrameLayout.LayoutParams(-1, -1));
     }
 
-    private void showWinDialog(int size, int idx, int st, long sec) {
-        if (isFinishing() || screen != Screen.GAME) return;
-        AlertDialog.Builder b = new AlertDialog.Builder(this)
-                .setTitle("Bravo ! 🐸")
-                .setMessage("Étang " + size + "×" + size + " n°" + idx + " réussi en " + (sec / 60) + " min "
-                        + (sec % 60) + " s\n\n" + "★★★".substring(0, st) + "☆☆☆".substring(st))
-                .setCancelable(false)
-                .setNegativeButton("Étangs", (d, w) -> showLevels(size));
-        if (idx < Puzzle.count(size))
-            b.setPositiveButton("Niveau suivant", (d, w) -> startLevel(size, idx + 1));
-        else
-            b.setPositiveButton("Menu", (d, w) -> showMenu());
-        b.show();
+    /** Niveau suivant de la même taille, ou premier niveau à faire de la taille suivante. */
+    private void playNext(int size, int idx) {
+        if (idx < Puzzle.count(size)) startLevel(size, idx + 1);
+        else if (size < Puzzle.MAX_SIZE) startLevel(size + 1, unlocked(size + 1));
+        else showLevels(size);
     }
 
     @Override
@@ -547,15 +650,20 @@ public class MainActivity extends Activity implements GameView.Listener {
         handler.removeCallbacks(tick);
         clearSave(curSize, curIndex);
         if (isFinishing() || screen != Screen.GAME) return;
+        final int size = curSize, idx = curIndex;
         handler.postDelayed(() -> {
-            if (isFinishing() || screen != Screen.GAME) return;
-            new AlertDialog.Builder(this)
-                    .setTitle("Plouf ! 💦")
-                    .setMessage("Plus de cœurs… Les grenouilles ont sauté dans l'eau.")
-                    .setCancelable(false)
-                    .setNegativeButton("Étangs", (d, w) -> showLevels(curSize))
-                    .setPositiveButton("Réessayer", (d, w) -> startLevel(curSize, curIndex))
-                    .show();
+            if (isFinishing() || screen != Screen.GAME || curSize != size || curIndex != idx) return;
+            openOverlay();
+            ResultCard.Config cfg = new ResultCard.Config();
+            cfg.title = "Plouf !";
+            cfg.ribbonTop = 0xFF6EC6F0;
+            cfg.ribbonBottom = 0xFF2F8FC9;
+            cfg.message = "Plus d'étoiles…\nLes grenouilles ont sauté dans l'eau.";
+            cfg.leftLabel = "Étangs";
+            cfg.left = () -> showLevels(size);
+            cfg.rightLabel = "Rejouer";
+            cfg.right = () -> startLevel(size, idx);
+            showCard(cfg);
         }, 700);
     }
 

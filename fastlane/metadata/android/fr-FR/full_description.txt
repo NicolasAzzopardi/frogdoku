@@ -1,0 +1,9 @@
+Frogdoku est un jeu de logique sur le thème de l'étang.
+
+Place une grenouille dans chaque étang coloré :
+• une seule grenouille par ligne et par colonne ;
+• une seule grenouille par étang ;
+• deux grenouilles ne se touchent jamais, même en diagonale.
+
+1 200 niveaux, de 5×5 à 16×16, du plus simple au très difficile. Chaque grille a une solution unique, trouvable par pure logique.
+Les parties en cours sont sauvegardées automatiquement.

@@ -1,0 +1,7 @@
+• Nouvelles tailles : 13×13 à 16×16
+• 100 niveaux par taille, nouveaux niveaux beaucoup plus difficiles
+• Nouveau design : boutons, panneaux, icônes, fond d'étang
+• Étoiles à la place des cœurs
+• Animations de victoire sur le plateau flouté, nouvelle fenêtre de résultat
+• Reprise automatique de l'écran ouvert à la fermeture
+• Icône visible dans F-Droid

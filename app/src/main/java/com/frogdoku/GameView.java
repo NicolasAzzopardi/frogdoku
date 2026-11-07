@@ -25,8 +25,13 @@ public class GameView extends View {
 
     private static final int[] COLORS = {
             0xFFAFD995, 0xFF4BB5B3, 0xFFA8C0D6, 0xFF5D78B3, 0xFF977BD6, 0xFFEA88B6,
-            0xFFF9B3CE, 0xFFAD7249, 0xFFFDA96B, 0xFFE3BA4B, 0xFFE57373, 0xFF7FC6E8
+            0xFFF9B3CE, 0xFFAD7249, 0xFFFDA96B, 0xFFE3BA4B, 0xFFE57373, 0xFF7FC6E8,
+            0xFFD4E157, 0xFF78909C, 0xFFC2185B, 0xFF00897B
     };
+
+    /** Couleur attribuée à chaque région (deux régions voisines reçoivent des couleurs bien distinctes). */
+    private int[] regionColor = new int[0];
+    private long[][] placedAt;
 
     private Puzzle puzzle;
     private int[][] state;
@@ -57,12 +62,52 @@ public class GameView extends View {
     public void setPuzzle(Puzzle p) {
         puzzle = p;
         state = new int[p.n][p.n];
+        placedAt = new long[p.n][p.n];
+        regionColor = assignColors(p);
         hearts = MAX_HEARTS;
         finished = false;
         undo.clear();
         errR = -1;
         invalidate();
         notifyChanged();
+    }
+
+    private static double colorDist(int a, int b) {
+        int dr = ((a >> 16) & 0xFF) - ((b >> 16) & 0xFF), dg = ((a >> 8) & 0xFF) - ((b >> 8) & 0xFF), db = (a & 0xFF) - (b & 0xFF);
+        return Math.sqrt(2 * dr * dr + 4 * dg * dg + 3 * db * db);
+    }
+
+    /** Coloration gloutonne : chaque région prend la couleur libre la plus éloignée de celles de ses voisines. */
+    private static int[] assignColors(Puzzle p) {
+        int n = p.n;
+        boolean[][] adj = new boolean[n][n];
+        for (int r = 0; r < n; r++)
+            for (int c = 0; c < n; c++) {
+                int k = p.region[r][c];
+                if (c + 1 < n && p.region[r][c + 1] != k) { adj[k][p.region[r][c + 1]] = true; adj[p.region[r][c + 1]][k] = true; }
+                if (r + 1 < n && p.region[r + 1][c] != k) { adj[k][p.region[r + 1][c]] = true; adj[p.region[r + 1][c]][k] = true; }
+            }
+        Integer[] order = new Integer[n];
+        int[] deg = new int[n];
+        for (int k = 0; k < n; k++) { order[k] = k; for (int j = 0; j < n; j++) if (adj[k][j]) deg[k]++; }
+        java.util.Arrays.sort(order, (x, y) -> deg[y] - deg[x]);
+        int[] out = new int[n];
+        java.util.Arrays.fill(out, -1);
+        boolean[] used = new boolean[COLORS.length];
+        for (int k : order) {
+            int best = -1;
+            double bestScore = -1;
+            for (int ci = 0; ci < COLORS.length; ci++) {
+                if (used[ci]) continue;
+                double score = 1e9;
+                for (int j = 0; j < n; j++)
+                    if (adj[k][j] && out[j] >= 0) score = Math.min(score, colorDist(COLORS[ci], out[j]));
+                if (score > bestScore) { bestScore = score; best = ci; }
+            }
+            used[best] = true;
+            out[k] = COLORS[best];
+        }
+        return out;
     }
 
     /** Grille sous forme de texte (un chiffre par case : 0 vide, 1 croix, 2 grenouille). */
@@ -184,6 +229,7 @@ public class GameView extends View {
     private void placeFrog(int r, int c) {
         int n = puzzle.n;
         state[r][c] = FROG;
+        placedAt[r][c] = SystemClock.uptimeMillis();
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         if (autoMark) {
             int reg = puzzle.region[r][c];
@@ -228,6 +274,7 @@ public class GameView extends View {
                 downR = r;
                 downC = c;
                 dragging = false;
+                invalidate();
                 return true;
             case MotionEvent.ACTION_MOVE:
                 if (downR < 0 || !inside(r, c)) return true;
@@ -243,9 +290,11 @@ public class GameView extends View {
             case MotionEvent.ACTION_UP:
                 if (downR >= 0 && !dragging) tap(downR, downC);
                 downR = -1;
+                invalidate();
                 return true;
             case MotionEvent.ACTION_CANCEL:
                 downR = -1;
+                invalidate();
                 return true;
         }
         return true;
@@ -260,12 +309,8 @@ public class GameView extends View {
 
     // ---------- Dessin ----------
 
-    private int backdrop = 0xFFF6F1EB;
 
-    /** Couleur du fond derrière le plateau (pour les raccords arrondis de l'onglet). */
-    public void setBackdrop(int color) { backdrop = color; invalidate(); }
-
-    public static int regionColor(int k) { return COLORS[k % COLORS.length]; }
+    private int colorOf(int k) { return k < regionColor.length ? regionColor[k] : COLORS[k % COLORS.length]; }
 
     private static int lighten(int c, float t) {
         int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
@@ -305,20 +350,30 @@ public class GameView extends View {
         float tabW = n * step + tabH * 0.6f;
         float tl = W / 2f - tabW / 2f, tr = W / 2f + tabW / 2f, tt = by - tabH;
         float fr = tabH * 0.32f; // rayon des raccords
-        paint.setStyle(Paint.Style.FILL);
-        paint.setColor(0xFFFFFFFF);
-        rect.set(tl, tt, tr, by + boardR);
-        canvas.drawRoundRect(rect, tabH * 0.45f, tabH * 0.45f, paint);
-        canvas.drawRect(tl - fr, by - fr, tl, by + 1, paint);
-        canvas.drawRect(tr, by - fr, tr + fr, by + 1, paint);
-        paint.setColor(backdrop);
-        canvas.drawCircle(tl - fr, by - fr, fr, paint);
-        canvas.drawCircle(tr + fr, by - fr, fr, paint);
-
-        // ---- plateau blanc ----
-        paint.setColor(0xFFFFFFFF);
+        android.graphics.Path shape = new android.graphics.Path();
         rect.set(bx, by, bx + boardW, by + boardH);
-        canvas.drawRoundRect(rect, boardR, boardR, paint);
+        shape.addRoundRect(rect, boardR, boardR, android.graphics.Path.Direction.CW);
+        android.graphics.Path tab = new android.graphics.Path();
+        rect.set(tl, tt, tr, by + boardR);
+        tab.addRoundRect(rect, tabH * 0.45f, tabH * 0.45f, android.graphics.Path.Direction.CW);
+        shape.op(tab, android.graphics.Path.Op.UNION);
+        for (int side = 0; side < 2; side++) {
+            float x0 = side == 0 ? tl - fr : tr, cxF = side == 0 ? tl - fr : tr + fr;
+            android.graphics.Path fil = new android.graphics.Path();
+            fil.addRect(x0, by - fr, x0 + fr, by + 1, android.graphics.Path.Direction.CW);
+            android.graphics.Path hole = new android.graphics.Path();
+            hole.addCircle(cxF, by - fr, fr, android.graphics.Path.Direction.CW);
+            fil.op(hole, android.graphics.Path.Op.DIFFERENCE);
+            shape.op(fil, android.graphics.Path.Op.UNION);
+        }
+        paint.setStyle(Paint.Style.FILL);
+        canvas.save();
+        canvas.translate(0, cs * 0.12f);
+        paint.setColor(0x26000000);
+        canvas.drawPath(shape, paint);
+        canvas.restore();
+        paint.setColor(0xFFFFFFFF);
+        canvas.drawPath(shape, paint);
 
         // têtes de grenouilles (une par étang)
         for (int k = 0; k < n; k++) {
@@ -331,7 +386,7 @@ public class GameView extends View {
                 if (t > 0 && t < 450) bounce = (float) Math.sin(Math.PI * t / 450.0) * tabH * 0.2f;
             }
             FrogPainter.drawHead(canvas, hx, hy - bounce, hs,
-                    found ? COLORS[k % COLORS.length] : lighten(COLORS[k % COLORS.length], 0.62f), found);
+                    found ? colorOf(k) : lighten(colorOf(k), 0.62f), found);
         }
 
         // ---- cases ----
@@ -339,13 +394,31 @@ public class GameView extends View {
         for (int r = 0; r < n; r++)
             for (int c = 0; c < n; c++) {
                 paint.setStyle(Paint.Style.FILL);
-                paint.setColor(COLORS[puzzle.region[r][c] % COLORS.length]);
+                paint.setColor(colorOf(puzzle.region[r][c]));
                 rect.set(ox + c * cs + gap, oy + r * cs + gap, ox + (c + 1) * cs - gap, oy + (r + 1) * cs - gap);
                 canvas.drawRoundRect(rect, tileR, tileR, paint);
                 float cx = ox + (c + 0.5f) * cs, cy = oy + (r + 0.5f) * cs;
+                if (r == downR && c == downC && !dragging && !finished) {
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(0x55FFFFFF);
+                    canvas.drawRoundRect(rect, tileR, tileR, paint);
+                }
                 if (state[r][c] == MARK) {
+                    drawCross(canvas, cx, cy + cs * 0.035f, cs, 0x30000000);
                     drawCross(canvas, cx, cy, cs, 0xFFFFFFFF);
                 } else if (state[r][c] == FROG) {
+                    long pt = now - placedAt[r][c];
+                    if (pt >= 0 && pt < 320) {
+                        // rebond à la pose (easeOutBack)
+                        float u = pt / 320f - 1;
+                        float k = 1 + 2.7f * u * u * u + 1.7f * u * u;
+                        canvas.save();
+                        canvas.scale(k, k, cx, cy + cs * 0.3f);
+                        FrogPainter.draw(canvas, cx, cy + cs * 0.04f, cs * 0.95f, false);
+                        canvas.restore();
+                        postInvalidateOnAnimation();
+                        continue;
+                    }
                     float hop = 0;
                     if (finished && winTime > 0) {
                         long t = now - winTime - r * 70L;
