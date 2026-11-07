@@ -18,9 +18,14 @@ javac --release 11 -nowarn -encoding UTF-8 -classpath "$JAR" -d "$OUT/classes" \
 (cd "$OUT/dex" && zip -q ../unsigned.apk classes.dex)
 
 "$BT/zipalign" -f -p 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
-KS=frogdoku.keystore
-[ -f "$KS" ] || keytool -genkeypair -keystore "$KS" -storepass android -keypass android \
-    -alias frogdoku -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Frogdoku" >/dev/null 2>&1
-"$BT/apksigner" sign --ks "$KS" --ks-pass pass:android --key-pass pass:android \
+KS="${FROGDOKU_KEYSTORE:-frogdoku.keystore}"
+PASS_FILE="${FROGDOKU_KS_PASS_FILE:-$HOME/.config/frogdoku/keystore.pass}"
+if [ ! -f "$KS" ] || [ ! -f "$PASS_FILE" ]; then
+    echo "Clé de signature introuvable : $KS et/ou $PASS_FILE" >&2
+    echo "(le mot de passe n'est volontairement pas stocké dans le projet)" >&2
+    exit 1
+fi
+"$BT/apksigner" sign --ks "$KS" --ks-key-alias frogdoku \
+    --ks-pass "file:$PASS_FILE" \
     --out Frogdoku.apk "$OUT/aligned.apk"
 echo "OK -> $(pwd)/Frogdoku.apk"
