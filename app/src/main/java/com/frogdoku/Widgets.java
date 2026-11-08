@@ -71,15 +71,17 @@ public final class Widgets {
     public static class LevelTile extends View {
         public static final int LOCKED = 0, OPEN = 1, CURRENT = 2, IN_PROGRESS = 3, DONE = 4;
         private final int number, state, stars;
+        private final String time;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG), txt = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF r = new RectF();
         private final long start = SystemClock.uptimeMillis();
 
-        public LevelTile(Context c, int number, int state, int stars) {
+        public LevelTile(Context c, int number, int state, int stars, String time) {
             super(c);
             this.number = number;
             this.state = state;
             this.stars = stars;
+            this.time = time;
             txt.setTypeface(Ui.font(c));
             txt.setTextAlign(Paint.Align.CENTER);
             if (state != LOCKED) Ui.pressable(this);
@@ -88,7 +90,7 @@ public final class Widgets {
         @Override
         protected void onDraw(Canvas c) {
             float w = getWidth(), h = getHeight();
-            float d = Math.min(w, h * 0.78f);
+            float d = Math.min(w, h * 0.66f);
             float cx = w / 2f, cy = d / 2f + h * 0.02f, rad = d * 0.46f;
             int top, bot, edge;
             switch (state) {
@@ -149,6 +151,13 @@ public final class Widgets {
                     float lift = i == 1 ? -ss * 0.12f : 0;
                     Ui.IconPainter.draw(c, Ui.IC_STAR, sx, sy + lift, ss,
                             i < stars ? 0xFFFFC51A : 0xFFD9D2C7, i < stars ? 0xFFB86E00 : 0xFFFFFFFF);
+                }
+                // meilleur temps
+                if (time != null) {
+                    txt.setTextSize(rad * 0.62f);
+                    txt.setStyle(Paint.Style.FILL);
+                    txt.setColor(0xFF6B5A4A);
+                    c.drawText(time, cx, sy + ss * 0.95f, txt);
                 }
             }
         }

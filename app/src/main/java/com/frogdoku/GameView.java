@@ -171,18 +171,28 @@ public class GameView extends View {
         notifyChanged();
     }
 
-    /** Pose une grenouille correcte non encore trouvée. */
-    public boolean hint() {
-        if (puzzle == null || finished) return false;
-        for (int r = 0; r < puzzle.n; r++) {
-            int c = puzzle.solution[r];
-            if (state[r][c] != FROG) {
-                pushUndo();
-                placeFrog(r, c);
-                return true;
-            }
-        }
-        return false;
+    // indices : cases mises en évidence
+    private final java.util.List<int[]> hintCells = new java.util.ArrayList<>();
+    private int[] hintFocus;
+    private long hintTime;
+
+    /**
+     * Indice : pose les croix de la prochaine déduction logique (ou met en évidence la seule case
+     * possible). Ne pose jamais de grenouille. Renvoie l'explication, ou null si rien à déduire.
+     */
+    public String hint() {
+        if (puzzle == null || finished) return null;
+        HintEngine.Hint h = HintEngine.compute(puzzle, state);
+        if (h == null) return null;
+        hintCells.clear();
+        hintFocus = h.focus;
+        if (!h.crosses.isEmpty() || !h.wrongCrosses.isEmpty()) pushUndo();
+        for (int[] x : h.wrongCrosses) { state[x[0]][x[1]] = EMPTY; hintCells.add(x); }
+        for (int[] x : h.crosses) { state[x[0]][x[1]] = MARK; hintCells.add(x); }
+        hintTime = SystemClock.uptimeMillis();
+        invalidate();
+        notifyChanged();
+        return h.message;
     }
 
     private void pushUndo() {
@@ -193,18 +203,48 @@ public class GameView extends View {
         if (undo.size() > 200) undo.removeLast();
     }
 
+    // double appui
+    private int lastTapR = -1, lastTapC = -1;
+    private long lastTapTime;
+    private static final long DOUBLE_TAP_MS = 300;
+
+    /** Appui simple : pose ou enlève une croix. Double appui sur la même case : grenouille. */
     private void tap(int r, int c) {
+        long now = SystemClock.uptimeMillis();
+        if (r == lastTapR && c == lastTapC && now - lastTapTime < DOUBLE_TAP_MS) {
+            lastTapR = -1;
+            // annule la croix posée/enlevée par le premier appui, puis tente la grenouille
+            if (!undo.isEmpty()) state = undo.pop();
+            if (state[r][c] != FROG) tryFrog(r, c);
+            invalidate();
+            notifyChanged();
+            return;
+        }
         int v = state[r][c];
         if (v == EMPTY) {
             pushUndo();
             state[r][c] = MARK;
         } else if (v == MARK) {
-            tryFrog(r, c);
+            pushUndo();
+            state[r][c] = EMPTY;
         }
         // une grenouille correcte est verrouillée
+        lastTapR = v == FROG ? -1 : r;
+        lastTapC = c;
+        lastTapTime = now;
         invalidate();
         notifyChanged();
     }
+
+    // appui long
+    private boolean longFired;
+    private final Runnable longPress = () -> {
+        if (downR < 0 || dragging || finished) return;
+        longFired = true;
+        lastTapR = -1;
+        if (state[downR][downC] != FROG) tryFrog(downR, downC);
+        invalidate();
+    };
 
     private void tryFrog(int r, int c) {
         if (puzzle.solution[r] == c) {
@@ -274,12 +314,17 @@ public class GameView extends View {
                 downR = r;
                 downC = c;
                 dragging = false;
+                longFired = false;
+                removeCallbacks(longPress);
+                postDelayed(longPress, android.view.ViewConfiguration.getLongPressTimeout());
                 invalidate();
                 return true;
             case MotionEvent.ACTION_MOVE:
                 if (downR < 0 || !inside(r, c)) return true;
-                if (!dragging && (r != downR || c != downC)) {
+                if (!dragging && !longFired && (r != downR || c != downC)) {
                     dragging = true;
+                    removeCallbacks(longPress);
+                    lastTapR = -1;
                     pushUndo();
                     int v = state[downR][downC];
                     dragMode = v == EMPTY ? 1 : (v == MARK ? 0 : -1);
@@ -288,11 +333,13 @@ public class GameView extends View {
                 if (dragging) applyDrag(r, c);
                 return true;
             case MotionEvent.ACTION_UP:
-                if (downR >= 0 && !dragging) tap(downR, downC);
+                removeCallbacks(longPress);
+                if (downR >= 0 && !dragging && !longFired) tap(downR, downC);
                 downR = -1;
                 invalidate();
                 return true;
             case MotionEvent.ACTION_CANCEL:
+                removeCallbacks(longPress);
                 downR = -1;
                 invalidate();
                 return true;
@@ -427,6 +474,26 @@ public class GameView extends View {
                     FrogPainter.draw(canvas, cx, cy - hop + cs * 0.04f, cs * 0.95f, false);
                 }
             }
+
+        // indices : croix éclairées en jaune, anneau pulsant sur la seule case possible
+        long ht = now - hintTime;
+        if (ht < 2600 && (!hintCells.isEmpty() || hintFocus != null)) {
+            float a = ht < 2000 ? 1f : 1f - (ht - 2000) / 600f;
+            float pulse = 0.5f + 0.5f * (float) Math.sin(ht / 120.0);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(cs * 0.09f);
+            paint.setColor(((int) (a * (150 + 105 * pulse)) << 24) | 0xFFE14D);
+            for (int[] x : hintCells) {
+                rect.set(ox + x[1] * cs + gap, oy + x[0] * cs + gap, ox + (x[1] + 1) * cs - gap, oy + (x[0] + 1) * cs - gap);
+                canvas.drawRoundRect(rect, tileR, tileR, paint);
+            }
+            if (hintFocus != null) {
+                float fcx = ox + (hintFocus[1] + 0.5f) * cs, fcy = oy + (hintFocus[0] + 0.5f) * cs;
+                paint.setStrokeWidth(cs * 0.1f);
+                canvas.drawCircle(fcx, fcy, cs * (0.36f + 0.08f * pulse), paint);
+            }
+            postInvalidateOnAnimation();
+        }
 
         // flash d'erreur
         if (errR >= 0) {

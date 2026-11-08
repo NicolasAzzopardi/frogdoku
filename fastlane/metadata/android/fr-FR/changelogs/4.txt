@@ -1,0 +1,6 @@
+• Appui : croix · Appui long ou double appui : grenouille
+• Indices pédagogiques : ils posent les croix de la prochaine déduction au lieu d'une grenouille
+• Tous les niveaux vérifiés solvables par pure logique
+• Bouton « Étangs » en fin de niveau
+• Catalogue : glisser pour changer de taille, meilleurs temps affichés
+• Correction du bouton Jouer tronqué

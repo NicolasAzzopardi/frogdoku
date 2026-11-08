@@ -232,6 +232,10 @@ public class MainActivity extends Activity implements GameView.Listener {
         panel.setGravity(Gravity.CENTER_HORIZONTAL);
         panel.setPadding(dp(18), dp(18), dp(18), dp(20));
         panel.setBackground(Ui.panel(this, 0xF2FFFFFF, 32));
+        panel.setClipChildren(false);
+        panel.setClipToPadding(false);
+        col.setClipChildren(false);
+        col.setClipToPadding(false);
         LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, -2);
         pp.topMargin = dp(26);
         col.addView(panel, pp);
@@ -243,12 +247,12 @@ public class MainActivity extends Activity implements GameView.Listener {
         FrameLayout play = Ui.button(this, cur != null ? "Reprendre" : "Jouer", 32,
                 Ui.GREEN_TOP, Ui.GREEN_BOT, Ui.GREEN_EDGE, v -> startLevel(size, next));
         LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(-1, dp(84));
-        playLp.topMargin = dp(10);
+        playLp.setMargins(dp(10), dp(12), dp(10), dp(4));
         panel.addView(play, playLp);
         // la bouton Jouer « respire » pour attirer l'œil
         android.animation.ObjectAnimator pulse = android.animation.ObjectAnimator.ofPropertyValuesHolder(play,
-                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.04f),
-                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.04f));
+                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.05f),
+                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.05f));
         pulse.setDuration(900);
         pulse.setRepeatMode(android.animation.ValueAnimator.REVERSE);
         pulse.setRepeatCount(android.animation.ValueAnimator.INFINITE);
@@ -268,6 +272,7 @@ public class MainActivity extends Activity implements GameView.Listener {
 
         ScrollView sv = new ScrollView(this);
         sv.setFillViewport(true);
+        sv.setClipChildren(false);
         sv.addView(col);
         screenView.addView(sv, new FrameLayout.LayoutParams(-1, -1));
         setScreen(screenView, Screen.MENU);
@@ -283,8 +288,10 @@ public class MainActivity extends Activity implements GameView.Listener {
                 + "• 1 seule par ligne et par colonne\n"
                 + "• 1 seule par étang\n"
                 + "• Jamais côte à côte, même en diagonale\n\n"
-                + "1 appui : croix ✕   ·   2 appuis : grenouille\n"
-                + "Glisse le doigt pour poser plusieurs croix.\n\n"
+                + "Appui : poser / enlever une croix ✕\n"
+                + "Appui long ou double appui : grenouille\n"
+                + "Glisse le doigt pour poser plusieurs croix.\n"
+                + "L'indice pose les croix de la prochaine déduction.\n\n"
                 + "Une grenouille mal placée coûte une étoile.";
         cfg.rightLabel = "Compris !";
         cfg.right = () -> root.removeView(holder[0]);
@@ -360,12 +367,14 @@ public class MainActivity extends Activity implements GameView.Listener {
             else if (hasSave(size, i)) state = Widgets.LevelTile.IN_PROGRESS;
             else if (st > 0) state = Widgets.LevelTile.DONE;
             else state = Widgets.LevelTile.CURRENT;
-            Widgets.LevelTile tile = new Widgets.LevelTile(this, i, state, st);
+            long best = prefs.getLong("best_" + size + "_" + i, -1);
+            Widgets.LevelTile tile = new Widgets.LevelTile(this, i, state, st,
+                    state == Widgets.LevelTile.DONE && best >= 0 ? formatTime(best) : null);
             if (state != Widgets.LevelTile.LOCKED) tile.setOnClickListener(v -> startLevel(size, idx));
             GridLayout.LayoutParams gp = new GridLayout.LayoutParams(
                     GridLayout.spec(GridLayout.UNDEFINED), GridLayout.spec(GridLayout.UNDEFINED, 1f));
             gp.width = 0;
-            gp.height = dp(80);
+            gp.height = dp(98);
             gp.setMargins(dp(2), dp(6), dp(2), dp(2));
             grid.addView(tile, gp);
         }
@@ -375,11 +384,67 @@ public class MainActivity extends Activity implements GameView.Listener {
         ScrollView sv = new ScrollView(this);
         sv.addView(col);
         setScreen(sv, Screen.LEVELS);
+        levelsChips = hs;
+        // arrivée par glissement : la page entre par le côté
+        if (slideFrom != 0) {
+            sv.setTranslationX(slideFrom * getResources().getDisplayMetrics().widthPixels * 0.6f);
+            sv.setAlpha(0.3f);
+            sv.animate().translationX(0).alpha(1f).setDuration(220)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+            slideFrom = 0;
+        }
         // garder l'onglet sélectionné visible
         hs.post(() -> {
             View sel = chips.getChildAt(size - Puzzle.MIN_SIZE);
             hs.scrollTo(Math.max(0, sel.getLeft() - dp(40)), 0);
         });
+    }
+
+    // glissement horizontal dans le catalogue : taille précédente / suivante
+    private HorizontalScrollView levelsChips;
+    private int slideFrom;
+    private float swipeX, swipeY;
+    private boolean swipeTracking;
+
+    @Override
+    public boolean dispatchTouchEvent(android.view.MotionEvent e) {
+        if (screen == Screen.LEVELS && root.getChildCount() == 1) {
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    swipeX = e.getRawX();
+                    swipeY = e.getRawY();
+                    swipeTracking = !touchInside(levelsChips, e);
+                    break;
+                case android.view.MotionEvent.ACTION_UP:
+                    if (swipeTracking) {
+                        float dx = e.getRawX() - swipeX, dy = e.getRawY() - swipeY;
+                        if (Math.abs(dx) > dp(70) && Math.abs(dx) > 2 * Math.abs(dy)) {
+                            int size = lastSize() + (dx < 0 ? 1 : -1);
+                            if (size >= Puzzle.MIN_SIZE && size <= Puzzle.MAX_SIZE) {
+                                swipeTracking = false;
+                                slideFrom = dx < 0 ? 1 : -1;
+                                android.view.MotionEvent cancel = android.view.MotionEvent.obtain(e);
+                                cancel.setAction(android.view.MotionEvent.ACTION_CANCEL);
+                                super.dispatchTouchEvent(cancel);
+                                cancel.recycle();
+                                showLevels(size);
+                                return true;
+                            }
+                        }
+                    }
+                    swipeTracking = false;
+                    break;
+            }
+        }
+        return super.dispatchTouchEvent(e);
+    }
+
+    private static boolean touchInside(View v, android.view.MotionEvent e) {
+        if (v == null || !v.isShown()) return false;
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        return e.getRawX() >= loc[0] && e.getRawX() <= loc[0] + v.getWidth()
+                && e.getRawY() >= loc[1] && e.getRawY() <= loc[1] + v.getHeight();
     }
 
     // ================= Jeu =================
@@ -442,7 +507,15 @@ public class MainActivity extends Activity implements GameView.Listener {
                 v -> game.undo());
         hintsLeft = 3;
         hintBtn = new Ui.IconButton(this, Ui.IC_HINT, "Indice", Ui.ORANGE_TOP, Ui.ORANGE_BOT, Ui.ORANGE_EDGE, 66, v -> {
-            if (hintsLeft > 0 && game.hint()) hintsLeft--;
+            if (hintsLeft > 0 && !game.isFinished()) {
+                String msg = game.hint();
+                if (msg != null) {
+                    hintsLeft--;
+                    showBubble(msg);
+                } else {
+                    showBubble("Rien de nouveau à déduire : pose une grenouille !");
+                }
+            }
             updateHud();
         });
         autoBtn = new Ui.IconButton(this, Ui.IC_CROSS, "Auto ✕", Ui.GREEN_TOP, Ui.GREEN_BOT, Ui.GREEN_EDGE, 66, v -> {
@@ -476,6 +549,31 @@ public class MainActivity extends Activity implements GameView.Listener {
         }
         updateHud();
         handler.post(tick);
+    }
+
+    /** Bulle d'information qui apparaît au-dessus du plateau puis disparaît. */
+    private void showBubble(String text) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(15);
+        t.setTextColor(0xFFFFFFFF);
+        t.setTypeface(Ui.font(this));
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(dp(18), dp(12), dp(18), dp(12));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xE62F5D8A);
+        bg.setCornerRadius(dp(22));
+        bg.setStroke(dp(2), 0xFFFFFFFF);
+        t.setBackground(bg);
+        t.setElevation(dp(8));
+        FrameLayout.LayoutParams fp = new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL | Gravity.TOP);
+        fp.setMargins(dp(24), dp(150), dp(24), 0);
+        root.addView(t, fp);
+        t.setAlpha(0f);
+        t.setTranslationY(-dp(12));
+        t.animate().alpha(1f).translationY(0).setDuration(220).start();
+        t.postDelayed(() -> t.animate().alpha(0f).setDuration(400)
+                .withEndAction(() -> root.removeView(t)).start(), 3800);
     }
 
     private void updateTimer() {
@@ -633,6 +731,8 @@ public class MainActivity extends Activity implements GameView.Listener {
             cfg.left = () -> startLevel(size, idx);
             cfg.rightLabel = "Suivant";
             cfg.right = () -> playNext(size, idx);
+            cfg.extraLabel = "Étangs";
+            cfg.extra = () -> showLevels(size);
             showCard(cfg);
         });
         overlay.addView(holder[0], new FrameLayout.LayoutParams(-1, -1));

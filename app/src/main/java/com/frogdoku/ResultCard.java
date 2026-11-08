@@ -34,8 +34,8 @@ public class ResultCard extends FrameLayout {
         public String subText;       // ex. "Nouveau record !"
         public String message;       // texte libre (défaite)
         public int stars = -1;       // -1 = pas d'étoiles
-        public String leftLabel, rightLabel;
-        public Runnable left, right;
+        public String leftLabel, rightLabel, extraLabel;
+        public Runnable left, right, extra;
     }
 
     private static final int INK = 0xFF4A3426;
@@ -99,6 +99,17 @@ public class ResultCard extends FrameLayout {
             row.addView(gameButton(cfg.leftLabel, Ui.ORANGE_TOP, Ui.ORANGE_BOT, Ui.ORANGE_EDGE, cfg.left), btnLp());
         if (cfg.rightLabel != null)
             row.addView(gameButton(cfg.rightLabel, Ui.GREEN_TOP, Ui.GREEN_BOT, Ui.GREEN_EDGE, cfg.right), btnLp());
+
+        // ---- bouton secondaire (retour au catalogue) ----
+        if (cfg.extraLabel != null) {
+            View extra = Ui.button(ctx, cfg.extraLabel, 18, Ui.BLUE_TOP, Ui.BLUE_BOT, Ui.BLUE_EDGE, v -> {
+                v.setEnabled(false);
+                if (cfg.extra != null) cfg.extra.run();
+            });
+            LinearLayout.LayoutParams ep = new LinearLayout.LayoutParams(dp(180), dp(54));
+            ep.topMargin = dp(10);
+            card.addView(extra, ep);
+        }
 
         // ---- ruban titre ----
         Ui.Label ribbon = new Ui.Label(ctx, cfg.title, 28, 0xFFFFFFFF, darker(cfg.ribbonBottom), 2.5f);
